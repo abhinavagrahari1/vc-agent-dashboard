@@ -75,8 +75,7 @@ const Dashboard = () => {
 
   const fetchRunningAgents = async () => {
     try {
-      const data = await fetchWithErrorHandling(`${API_BASE}/running_agents`);
-      setRunningAgents(data);
+      setRunningAgents(await fetchWithErrorHandling(`${API_BASE}/running_agents`));
     } catch {
       setRunningAgents([]);
     }
@@ -132,12 +131,11 @@ const Dashboard = () => {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/dispatch_call`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_name: selectedAgent, phone_number: phoneNumber })
-      });
-      const data = await response.json();
+      // const response = await fetch(`${API_BASE}/dispatch_call`, {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ agent_name: selectedAgent, phone_number: phoneNumber })
+      // });
       showNotification('Call dispatched successfully', 'success');
       setShowDispatchModal(false);
       setPhoneNumber('');
@@ -150,7 +148,7 @@ const Dashboard = () => {
       }
     }
     setLoading(false);
-  }, [selectedAgent, phoneNumber, API_BASE]);
+  }, [selectedAgent, phoneNumber]);
 
   const showNotification = (message: string, type: string) => {
     setNotification({ message, type } as { message: string; type: string } | null);
@@ -365,18 +363,22 @@ const Dashboard = () => {
       value: string
     ) => {
       const newAssistants = [...assistants];
-      if (field === 'stt' && (subfield === 'name' || subfield === 'language' || subfield === 'model')) {
-        (newAssistants[index].stt as any)[subfield] = value;
-      } else if (field === 'llm' && (subfield === 'name' || subfield === 'model')) {
-        (newAssistants[index].llm as any)[subfield] = value;
-      } else if (field === 'llm' && subfield === 'temperature') {
-        newAssistants[index].llm.temperature = parseFloat(value);
-      } else if (field === 'tts' && (subfield === 'name' || subfield === 'voice_id' || subfield === 'language' || subfield === 'model')) {
-        (newAssistants[index].tts as any)[subfield] = value;
-      } else if (field === 'vad' && subfield === 'name') {
-        newAssistants[index].vad.name = value;
-      } else if (field === 'vad' && subfield === 'min_silence_duration') {
-        newAssistants[index].vad.min_silence_duration = parseFloat(value);
+      if (field === 'stt') {
+        if (subfield === 'name') newAssistants[index].stt.name = value;
+        else if (subfield === 'language') newAssistants[index].stt.language = value;
+        else if (subfield === 'model') newAssistants[index].stt.model = value;
+      } else if (field === 'llm') {
+        if (subfield === 'name') newAssistants[index].llm.name = value;
+        else if (subfield === 'model') newAssistants[index].llm.model = value;
+        else if (subfield === 'temperature') newAssistants[index].llm.temperature = parseFloat(value);
+      } else if (field === 'tts') {
+        if (subfield === 'name') newAssistants[index].tts.name = value;
+        else if (subfield === 'voice_id') newAssistants[index].tts.voice_id = value;
+        else if (subfield === 'language') newAssistants[index].tts.language = value;
+        else if (subfield === 'model') newAssistants[index].tts.model = value;
+      } else if (field === 'vad') {
+        if (subfield === 'name') newAssistants[index].vad.name = value;
+        else if (subfield === 'min_silence_duration') newAssistants[index].vad.min_silence_duration = parseFloat(value);
       }
       setAssistants(newAssistants);
     };
@@ -388,7 +390,11 @@ const Dashboard = () => {
       value: boolean | number
     ) => {
       const newAssistants = [...assistants];
-      (newAssistants[index].tts.voice_settings as any)[field] = value;
+      if (field === 'similarity_boost') newAssistants[index].tts.voice_settings.similarity_boost = value as number;
+      else if (field === 'stability') newAssistants[index].tts.voice_settings.stability = value as number;
+      else if (field === 'style') newAssistants[index].tts.voice_settings.style = value as number;
+      else if (field === 'use_speaker_boost') newAssistants[index].tts.voice_settings.use_speaker_boost = value as boolean;
+      else if (field === 'speed') newAssistants[index].tts.voice_settings.speed = value as number;
       setAssistants(newAssistants);
     };
 
