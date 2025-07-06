@@ -32,7 +32,7 @@ const Dashboard = () => {
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [notification, setNotification] = useState(null);
+  const [notification, setNotification] = useState<{ message: string; type: string } | null>(null);
 
   // API base URL - update this to match your FastAPI server
   const API_BASE = 'http://15.206.88.67:8000';
@@ -62,12 +62,12 @@ const Dashboard = () => {
     fetchRunningAgents();
     // const interval = setInterval(fetchRunningAgents, 5000);
     // return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchAgents = async () => {
     try {
-      const data = await fetchWithErrorHandling(`${API_BASE}/agents`);
-      setAgents(data);
+      setAgents(await fetchWithErrorHandling(`${API_BASE}/agents`));
     } catch {
       setAgents([]);
     }
@@ -153,7 +153,7 @@ const Dashboard = () => {
   }, [selectedAgent, phoneNumber, API_BASE]);
 
   const showNotification = (message: string, type: string) => {
-    setNotification({ message, type } as any); // type cast to any to avoid TS error
+    setNotification({ message, type } as { message: string; type: string } | null);
     setTimeout(() => setNotification(null), 3000);
   };
 
@@ -327,7 +327,7 @@ const Dashboard = () => {
         fetchAgents();
         fetchRunningAgents();
         handleClose();
-      } catch (err) {
+      } catch (err: unknown) {
         if (err instanceof Error) {
           showNotification(`Failed to create agent: ${err.message}`, 'error');
         } else {
