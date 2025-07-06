@@ -35,8 +35,8 @@ const Dashboard = () => {
   const [notification, setNotification] = useState(null);
 
   // API base URL - update this to match your FastAPI server
-  // const API_BASE = 'http://127.0.0.1:8000';
-  const API_BASE = 'https://55f5-15-206-88-67.ngrok-free.app'
+  const API_BASE = 'http://15.206.88.67:8000';
+  // const API_BASE = 'https://55f5-15-206-88-67.ngrok-free.app'
   
   // Add error handling for API calls
   const fetchWithErrorHandling = async (url: string, options = {}) => {
