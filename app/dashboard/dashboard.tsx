@@ -1,7 +1,7 @@
 'use client';
-import React, { useState, useEffect, memo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Play, Square, Zap, Phone, Settings, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, ArrowDownLeft, ArrowUpRight
+  Play, Square, Zap, Phone, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, ArrowDownLeft, ArrowUpRight
 } from 'lucide-react';
 
 // Define types for agent and running agent
@@ -28,7 +28,6 @@ const Dashboard = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runningAgents, setRunningAgents] = useState<RunningAgent[]>([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('agents');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState('');
@@ -69,8 +68,7 @@ const Dashboard = () => {
     try {
       const data = await fetchWithErrorHandling(`${API_BASE}/agents`);
       setAgents(data);
-    } catch (error) {
-      // Error already handled in fetchWithErrorHandling
+    } catch {
       setAgents([]);
     }
   };
@@ -79,8 +77,7 @@ const Dashboard = () => {
     try {
       const data = await fetchWithErrorHandling(`${API_BASE}/running_agents`);
       setRunningAgents(data);
-    } catch (error) {
-      // Error already handled in fetchWithErrorHandling
+    } catch {
       setRunningAgents([]);
     }
   };
@@ -88,18 +85,17 @@ const Dashboard = () => {
   const runAgent = async (agentName: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/run_agent`, {
+      await fetch(`${API_BASE}/run_agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_name: agentName })
       });
-      const data = await response.json();
       showNotification(`Agent ${agentName} started successfully`, 'success');
       fetchRunningAgents();
       fetchAgents();
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        showNotification(`Failed to start agent: ${error.message}`, 'error');
+    } catch (err) {
+      if (err instanceof Error) {
+        showNotification(`Failed to start agent: ${err.message}`, 'error');
       } else {
         showNotification('Failed to start agent', 'error');
       }
@@ -110,18 +106,17 @@ const Dashboard = () => {
   const stopAgent = async (agentName: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/stop_agent`, {
+      await fetch(`${API_BASE}/stop_agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_name: agentName })
       });
-      const data = await response.json();
       showNotification(`Agent ${agentName} stopped successfully`, 'success');
       fetchRunningAgents();
       fetchAgents();
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        showNotification(`Failed to stop agent: ${error.message}`, 'error');
+    } catch (err) {
+      if (err instanceof Error) {
+        showNotification(`Failed to stop agent: ${err.message}`, 'error');
       } else {
         showNotification('Failed to stop agent', 'error');
       }
@@ -158,7 +153,7 @@ const Dashboard = () => {
   }, [selectedAgent, phoneNumber, API_BASE]);
 
   const showNotification = (message: string, type: string) => {
-    setNotification({ message, type });
+    setNotification({ message, type } as any); // type cast to any to avoid TS error
     setTimeout(() => setNotification(null), 3000);
   };
 
@@ -166,7 +161,7 @@ const Dashboard = () => {
     return runningAgents.some((ra: RunningAgent) => ra.agent_name === agentName);
   };
 
-  const StatCard = ({ title, value, icon: Icon, color, trend }) => (
+  const StatCard = ({ title, value, icon: Icon, color }: { title: string; value: number; icon: React.ElementType; color: string }) => (
     <div className="group relative overflow-hidden bg-white/70 backdrop-blur-xl rounded-3xl p-8 shadow-2xl border border-white/20 hover:shadow-3xl hover:scale-105 transition-all duration-500">
       <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent"></div>
       <div className="relative z-10">
@@ -286,7 +281,7 @@ const Dashboard = () => {
   const sectionIcon = (icon: React.ReactNode, color: string) => <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full mr-2 ${color}`}>{icon}</span>;
 
   // CreateAgentModal for creating a new agent with nested assistant fields
-  const CreateAgentModal = ({ show, onClose, onCreate }: { show: boolean; onClose: () => void; onCreate: (agent: any) => void }) => {
+  const CreateAgentModal = ({ show, onClose }: { show: boolean; onClose: () => void }) => {
     const [agentName, setAgentName] = useState('Agent');
     const [agentType, setAgentType] = useState('INBOUND');
     const [assistants, setAssistants] = useState([{
@@ -332,8 +327,12 @@ const Dashboard = () => {
         fetchAgents();
         fetchRunningAgents();
         handleClose();
-      } catch (error: any) {
-        showNotification(`Failed to create agent: ${error.message || error}`, 'error');
+      } catch (err) {
+        if (err instanceof Error) {
+          showNotification(`Failed to create agent: ${err.message}`, 'error');
+        } else {
+          showNotification('Failed to create agent', 'error');
+        }
       }
     };
 
@@ -676,21 +675,18 @@ const Dashboard = () => {
             value={agents.length}
             icon={Cpu}
             color="bg-gradient-to-r from-blue-500 to-blue-600"
-            trend="+12%"
           />
           <StatCard
             title="Active Agents"
             value={runningAgents.length}
             icon={Activity}
             color="bg-gradient-to-r from-emerald-500 to-emerald-600"
-            trend="+8%"
           />
           <StatCard
             title="Idle Agents"
             value={agents.length - runningAgents.length}
             icon={Square}
             color="bg-gradient-to-r from-gray-500 to-gray-600"
-            trend="-4%"
           />
         </div>
 
@@ -741,9 +737,6 @@ const Dashboard = () => {
       <CreateAgentModal
         show={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreate={(agent) => {
-          // Handle agent creation
-        }}
       />
       <DispatchModal
         show={showDispatchModal}
