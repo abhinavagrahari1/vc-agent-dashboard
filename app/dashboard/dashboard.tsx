@@ -34,10 +34,6 @@ const Dashboard = () => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: string } | null>(null);
 
-  // API base URL - update this to match your FastAPI server
-  const API_BASE = 'http://15.206.88.67:8000';
-  // const API_BASE = 'https://55f5-15-206-88-67.ngrok-free.app'
-  
   // Add error handling for API calls
   const fetchWithErrorHandling = async (url: string, options = {}) => {
     try {
@@ -67,7 +63,7 @@ const Dashboard = () => {
 
   const fetchAgents = async () => {
     try {
-      setAgents(await fetchWithErrorHandling(`${API_BASE}/agents`));
+      setAgents(await fetchWithErrorHandling('/api/agents'));
     } catch {
       setAgents([]);
     }
@@ -75,7 +71,7 @@ const Dashboard = () => {
 
   const fetchRunningAgents = async () => {
     try {
-      setRunningAgents(await fetchWithErrorHandling(`${API_BASE}/running_agents`));
+      setRunningAgents(await fetchWithErrorHandling('/api/running_agents'));
     } catch {
       setRunningAgents([]);
     }
@@ -84,7 +80,7 @@ const Dashboard = () => {
   const runAgent = async (agentName: string) => {
     setLoading(true);
     try {
-      await fetch(`${API_BASE}/run_agent`, {
+      await fetch('/api/run_agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_name: agentName })
@@ -105,7 +101,7 @@ const Dashboard = () => {
   const stopAgent = async (agentName: string) => {
     setLoading(true);
     try {
-      await fetch(`${API_BASE}/stop_agent`, {
+      await fetch('/api/stop_agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_name: agentName })
@@ -131,11 +127,11 @@ const Dashboard = () => {
     }
     setLoading(true);
     try {
-      // const response = await fetch(`${API_BASE}/dispatch_call`, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ agent_name: selectedAgent, phone_number: phoneNumber })
-      // });
+      await fetch('/api/dispatch_call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_name: selectedAgent, phone_number: phoneNumber })
+      });
       showNotification('Call dispatched successfully', 'success');
       setShowDispatchModal(false);
       setPhoneNumber('');
@@ -312,8 +308,8 @@ const Dashboard = () => {
       };
       // Determine endpoint based on type
       const endpoint = agentType === 'OUTBOUND'
-        ? `${API_BASE}/create-outbound-agent`
-        : `${API_BASE}/create-inbound-agent`;
+        ? '/api/create-outbound-agent'
+        : '/api/create-inbound-agent';
       try {
         const response = await fetch(endpoint, {
           method: 'POST',

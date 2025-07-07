@@ -1,3 +1,4 @@
+// Root page for the app directory
 import Image from "next/image";
 
 export default function Home() {
