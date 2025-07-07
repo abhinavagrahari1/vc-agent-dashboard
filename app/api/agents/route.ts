@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const API_BASE = 'http://15.206.88.67:8000';
+const API_BASE = 'http://13.233.50.22:8000';
+// const API_BASE = 'http://127.0.0.1:8000';
 
 export async function GET() {
   const res = await fetch(`${API_BASE}/agents`);
