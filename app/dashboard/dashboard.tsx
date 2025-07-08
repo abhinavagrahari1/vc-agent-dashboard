@@ -761,7 +761,7 @@ const Dashboard = () => {
                 type="tel"
                 value={phoneNumber ?? ''}
                 onChange={(e) => setPhoneNumber(e.target.value)}
-                placeholder="+91 911 244 0000"
+                placeholder="+1"
                 className="w-full px-4 py-3 border-2 border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-700 focus:border-transparent bg-gray-900 text-white placeholder-gray-400"
                 autoFocus
               />
