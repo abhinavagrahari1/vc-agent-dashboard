@@ -3,28 +3,92 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Play, Square, Zap, Phone, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, ArrowDownLeft, ArrowUpRight
 } from 'lucide-react';
+import { APPOINTMENT_SCHEDULAR } from '../utils/appointment_schedular';
+import { CUSTOMER_SUPPORT_SPECIALIST } from '../utils/customer_support_specialist';
+import { CARE_COORDINATOR } from '../utils/care_coordinator';
+import { Formik, Form, Field, FieldArray, FormikHelpers, FieldArrayRenderProps } from 'formik';
 
 // Define types for agent and running agent
-interface Assistant {
+interface AssistantTTS {
+  name: string;
+  // ElevenLabs fields
+  voice_id?: string;
+  model: string;
+  language?: string;
+  voice_settings?: {
+    similarity_boost: number;
+    stability: number;
+    style: number;
+    use_speaker_boost: boolean;
+    speed: number;
+  };
+  // Sarvam fields
+  target_language_code?: string;
+  speaker?: string;
+  loudness?: number;
+  speed?: number;
+  enable_preprocessing?: boolean;
+}
+
+type Assistant = {
   name: string;
   prompt: string;
   stt: { name: string; language: string; model: string };
   llm: { name: string; model: string; temperature: number };
-  tts: { name: string; voice_id: string; language: string; model: string; voice_settings: { similarity_boost: number; stability: number; style: number; use_speaker_boost: boolean; speed: number } };
+  tts: AssistantTTS;
   vad: { name: string; min_silence_duration: number };
-}
+};
+
 interface Agent {
   name: string;
   type: string;
   config_path?: string;
   assistant: Assistant[];
 }
+
 interface RunningAgent {
   agent_name: string;
   pid: number;
 }
 
+// Place these at the top of the file/component, before useState for assistants
+const PROVIDER_DEFAULTS = {
+  elevenlabs: {
+    name: 'elevenlabs',
+    voice_id: 'H8bdWZHK2OgZwTN7ponr',
+    model: 'eleven_flash_v2_5',
+    language: 'en-US',
+    voice_settings: {
+      similarity_boost: 1,
+      stability: 0.7,
+      style: 0.7,
+      use_speaker_boost: false,
+      speed: 1.1
+    }
+  },
+  sarvam_tts: {
+    name: 'sarvam_tts',
+    target_language_code: 'en-IN',
+    model: 'bulbul:v2',
+    speaker: 'anushka',
+    loudness: 1.1,
+    speed: 0.8,
+    enable_preprocessing: true
+  },
+  sarvam: {
+    name: 'sarvam',
+    model: 'saarika:v2.5',
+    language: 'en-IN'
+  },
+  deepgram: {
+    name: 'deepgram',
+    model: 'alex',
+    language: 'en-US'
+  }
+};
+
 const Dashboard = () => {
+
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runningAgents, setRunningAgents] = useState<RunningAgent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,6 +97,45 @@ const Dashboard = () => {
   const [selectedAgent, setSelectedAgent] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: string } | null>(null);
+
+  // Add preset agent templates
+  const agentTemplates = [
+    {
+      key: 'customer_support_specialist',
+      label: 'Customer Support Specialist',
+      agent: CUSTOMER_SUPPORT_SPECIALIST
+    },
+    {
+      key: 'care_coordinator',
+      label: 'Care Coordinator',
+      agent: CARE_COORDINATOR
+    },
+    {
+      key: 'appointment_schedular',
+      label: 'Appointment Schedular',
+      agent: APPOINTMENT_SCHEDULAR
+    },
+    {
+      key: 'custom_agent',
+      label: 'Custom Agent',
+      agent: null // will use current default values
+    }
+  ];
+
+  // Add state for template selection
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+
+  // Add state for agent modal values
+  const [agentName, setAgentName] = useState('Agent');
+  const [agentType, setAgentType] = useState('INBOUND');
+  const [assistants, setAssistants] = useState<Assistant[]>([{
+    name: 'Neha',
+    prompt: 'You are a helpful agent...',
+    stt: { name: 'sarvam', language: 'en-IN', model: 'saarika:v2.5' },
+    llm: { name: 'openai', model: 'gpt-4.1-mini', temperature: 0.3 },
+    tts: { ...PROVIDER_DEFAULTS.elevenlabs },
+    vad: { name: 'silero', min_silence_duration: 0.2 }
+  }]);
 
   // Add error handling for API calls
   const fetchWithErrorHandling = async (url: string, options = {}) => {
@@ -271,134 +374,63 @@ const Dashboard = () => {
     );
   };
 
-  // Helper for section icons
-  const sectionIcon = (icon: React.ReactNode, color: string) => <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full mr-2 ${color}`}>{icon}</span>;
-
-  // CreateAgentModal for creating a new agent with nested assistant fields
-  const CreateAgentModal = ({ show, onClose }: { show: boolean; onClose: () => void }) => {
-    const [agentName, setAgentName] = useState('Agent');
-    const [agentType, setAgentType] = useState('INBOUND');
-    const [assistants, setAssistants] = useState([{
-      name: 'Neha',
-      prompt: 'You are a good agent',
-      stt: { name: 'sarvam', language: 'hindi', model: 'saarika:v2.5' },
-      llm: { name: 'openai', model: 'gpt-4.1-mini', temperature: 0.3 },
-      tts: { name: 'elevenlabs', voice_id: 'H8bdWZHK2OgZwTN7ponr', language: 'hi', model: 'eleven_flash_v2_5', voice_settings: { similarity_boost: 1, stability: 0.7, style: 0.7, use_speaker_boost: false, speed: 1.1 } },
-      vad: { name: 'silero', min_silence_duration: 0.2 }
-    }]);
-
-    const handleClose = () => {
-      setAgentName(''); setAgentType('INBOUND');
-      setAssistants([{
-        name: '',
-        prompt: '',
-        stt: { name: '', language: '', model: '' },
-        llm: { name: '', model: '', temperature: 0.3 },
-        tts: { name: '', voice_id: '', language: '', model: '', voice_settings: { similarity_boost: 1, stability: 0.7, style: 0.7, use_speaker_boost: false, speed: 1.1 } },
-        vad: { name: '', min_silence_duration: 0.2 }
-      }]);
-      onClose();
-    };
-
-    const handleCreate = async () => {
-      const agent = {
-        name: agentName,
-        type: agentType,
-        assistant: assistants
-      };
-      // Determine endpoint based on type
-      const endpoint = agentType === 'OUTBOUND'
-        ? '/api/create-outbound-agent'
-        : '/api/create-inbound-agent';
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent })
-        });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        showNotification('Agent created successfully', 'success');
-        fetchAgents();
-        fetchRunningAgents();
-        handleClose();
-      } catch (err: unknown) {
-        if (err instanceof Error) {
-          showNotification(`Failed to create agent: ${err.message}`, 'error');
-        } else {
-          showNotification('Failed to create agent', 'error');
-        }
-      }
-    };
-
-    const addAssistant = () => {
-      setAssistants([...assistants, {
-        name: '',
-        prompt: '',
-        stt: { name: '', language: '', model: '' },
-        llm: { name: '', model: '', temperature: 0.3 },
-        tts: { name: '', voice_id: '', language: '', model: '', voice_settings: { similarity_boost: 1, stability: 0.7, style: 0.7, use_speaker_boost: false, speed: 1.1 } },
-        vad: { name: '', min_silence_duration: 0.2 }
-      }]);
-    };
-
-    const removeAssistant = (index: number) => {
-      const newAssistants = assistants.filter((_, i) => i !== index);
-      setAssistants(newAssistants);
-    };
-
-    const handleAssistantChange = (index: number, field: 'name' | 'prompt', value: string) => {
-      const newAssistants = [...assistants];
-      newAssistants[index][field] = value;
-      setAssistants(newAssistants);
-    };
-
-    const handleAssistantSubfieldChange = (
-      index: number,
-      field: 'stt' | 'llm' | 'tts' | 'vad',
-      subfield: string,
-      value: string
-    ) => {
-      const newAssistants = [...assistants];
-      if (field === 'stt') {
-        if (subfield === 'name') newAssistants[index].stt.name = value;
-        else if (subfield === 'language') newAssistants[index].stt.language = value;
-        else if (subfield === 'model') newAssistants[index].stt.model = value;
-      } else if (field === 'llm') {
-        if (subfield === 'name') newAssistants[index].llm.name = value;
-        else if (subfield === 'model') newAssistants[index].llm.model = value;
-        else if (subfield === 'temperature') newAssistants[index].llm.temperature = parseFloat(value);
-      } else if (field === 'tts') {
-        if (subfield === 'name') newAssistants[index].tts.name = value;
-        else if (subfield === 'voice_id') newAssistants[index].tts.voice_id = value;
-        else if (subfield === 'language') newAssistants[index].tts.language = value;
-        else if (subfield === 'model') newAssistants[index].tts.model = value;
-      } else if (field === 'vad') {
-        if (subfield === 'name') newAssistants[index].vad.name = value;
-        else if (subfield === 'min_silence_duration') newAssistants[index].vad.min_silence_duration = parseFloat(value);
-      }
-      setAssistants(newAssistants);
-    };
-
-    type VoiceSettingsField = keyof typeof assistants[0]['tts']['voice_settings'];
-    const handleAssistantTTSVoiceSettingsChange = (
-      index: number,
-      field: VoiceSettingsField,
-      value: boolean | number
-    ) => {
-      const newAssistants = [...assistants];
-      if (field === 'similarity_boost') newAssistants[index].tts.voice_settings.similarity_boost = value as number;
-      else if (field === 'stability') newAssistants[index].tts.voice_settings.stability = value as number;
-      else if (field === 'style') newAssistants[index].tts.voice_settings.style = value as number;
-      else if (field === 'use_speaker_boost') newAssistants[index].tts.voice_settings.use_speaker_boost = value as boolean;
-      else if (field === 'speed') newAssistants[index].tts.voice_settings.speed = value as number;
-      setAssistants(newAssistants);
-    };
-
+  // Formik-based CreateAgentModal for creating a new agent with nested assistant fields
+  const CreateAgentModal = ({ show, onClose, agentName, agentType, assistants, onCreate }: {
+    show: boolean;
+    onClose: () => void;
+    agentName: string;
+    agentType: string;
+    assistants: Assistant[];
+    onCreate: (values: { agentName: string; agentType: string; assistants: Assistant[] }) => void;
+  }) => {
+    // Always call hooks at the top
+    const [ttsAdvancedOpen, setTtsAdvancedOpen] = useState<Record<string, boolean>>({});
     if (!show) return null;
+
+    type FormValues = {
+      agentName: string;
+      agentType: string;
+      assistants: Assistant[];
+    };
+
+    const initialValues: FormValues = {
+      agentName,
+      agentType,
+      assistants,
+    };
+
+    const defaultAssistant: Assistant = {
+      name: '',
+      prompt: '',
+      stt: { name: '', language: '', model: '' },
+      llm: { name: '', model: '', temperature: 0.3 },
+      tts: {
+        name: '',
+        voice_id: '',
+        language: '',
+        model: '',
+        voice_settings: {
+          similarity_boost: 1,
+          stability: 0.7,
+          style: 0.7,
+          use_speaker_boost: false,
+          speed: 1
+        }
+      },
+      vad: { name: '', min_silence_duration: 0.2 }
+    };
+
+    const sectionLabel = (icon: React.ReactNode, text: string) => (
+      <h4 className="flex items-center gap-2 font-bold text-md mb-2 text-gray-700">
+        {icon}
+        {text}
+      </h4>
+    );
+
     return (
       <div className="fixed inset-0 bg-gradient-to-br from-blue-100/80 via-purple-100/80 to-pink-100/80 flex items-center justify-center z-50 p-4">
         <div className="bg-white/95 backdrop-blur-2xl rounded-3xl p-8 w-full max-w-2xl shadow-2xl border border-white/30 overflow-y-auto max-h-[90vh] relative font-sans">
-          <button onClick={handleClose} className="absolute top-4 right-4 w-12 h-12 rounded-full bg-gradient-to-br from-red-400 to-pink-500 text-white shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-10">
+          <button onClick={onClose} className="absolute top-4 right-4 w-12 h-12 rounded-full bg-gradient-to-br from-red-400 to-pink-500 text-white shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-10">
             <X className="w-6 h-6" />
           </button>
           <div className="flex items-center gap-3 mb-8">
@@ -407,155 +439,295 @@ const Dashboard = () => {
             </span>
             <h3 className="text-3xl font-extrabold bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 bg-clip-text text-transparent tracking-tight">Create New Agent</h3>
           </div>
-          <div className="space-y-10">
-            {/* Agent Section */}
-            <div>
-              <h4 className="flex items-center text-xl font-bold text-blue-700 mb-4 border-b border-blue-200 pb-2">
-                {sectionIcon(<Cpu className="w-5 h-5" />, 'bg-blue-100 text-blue-600')}Agent
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Agent Name</label>
-                  <input type="text" value={agentName ?? ''} onChange={e => setAgentName(e.target.value)} className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
+          <Formik
+            initialValues={initialValues}
+            enableReinitialize
+            onSubmit={(values: FormValues, actions: FormikHelpers<FormValues>) => {
+              onCreate(values);
+              actions.resetForm();
+              onClose();
+            }}
+          >
+            {({ values, handleReset }: { values: FormValues; handleReset: () => void }) => (
+              <Form>
+                <div className="space-y-10">
+                  {/* Agent Section */}
+                  <div>
+                    <h4 className="flex items-center text-xl font-bold text-blue-700 mb-4 border-b border-blue-200 pb-2">
+                      {sectionLabel(<Cpu className="w-5 h-5" />, 'Agent')}
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Agent Name (optional)</label>
+                        <Field name="agentName" as="input" type="text" className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" placeholder="Agent Name (optional)" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Type</label>
+                        <Field name="agentType" as="select" className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500">
+                          <option value="INBOUND">INBOUND</option>
+                          <option value="OUTBOUND">OUTBOUND</option>
+                        </Field>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Assistants Section */}
+                  <div>
+                    <FieldArray name="assistants">
+                      {({ push, remove }: FieldArrayRenderProps) => (
+                        <>
+                          <h4 className="flex items-center text-xl font-bold text-purple-700 mb-4 border-b border-purple-200 pb-2 justify-between">
+                            <span>{sectionLabel(<Users className="w-5 h-5" />, 'bg-purple-100 text-purple-600')}Assistants</span>
+                            <button type="button" onClick={() => push(defaultAssistant)} className="ml-4 px-5 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold shadow-lg hover:scale-105 transition-transform">+ Add Assistant</button>
+                          </h4>
+                          {values.assistants.map((assistant: Assistant, idx: number) => (
+                            <div key={idx} className="mb-10 border border-purple-200 rounded-2xl p-6 bg-purple-50/60 relative shadow-md">
+                              {values.assistants.length > 1 && (
+                                <button type="button" onClick={() => remove(idx)} className="absolute top-3 right-3 text-red-500 hover:text-red-700 font-bold text-2xl bg-white rounded-full w-8 h-8 flex items-center justify-center shadow-md">&times;</button>
+                              )}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                                <div>
+                                  <label className="block text-sm font-semibold text-gray-700 mb-2">Name</label>
+                                  <Field name={`assistants[${idx}].name`} as="input" type="text" className="w-full px-4 py-3 border-2 border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                </div>
+                              </div>
+                              <div className="mb-4">
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Prompt</label>
+                                <Field name={`assistants[${idx}].prompt`} as="textarea" rows={6} className="w-full px-4 py-3 border-2 border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent bg-white transition-shadow hover:shadow-md resize-y min-h-[120px] text-gray-700 placeholder-gray-500" />
+                              </div>
+                              {/* STT Section */}
+                              <div className="mb-4">
+                                <h5 className="flex items-center text-md font-bold text-green-700 mb-2 mt-4">
+                                  {sectionLabel(<Mic className="w-4 h-4 bg-green-100 text-green-600 rounded-full p-1" />, 'STT (Speech-to-Text)')}
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Provider</label>
+                                    <Field
+                                      name={`assistants[${idx}].stt.name`}
+                                      as="select"
+                                      className="w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500"
+                                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                                        const value = e.target.value as 'sarvam' | 'deepgram' | '';
+                                        let def;
+                                        if (value === 'sarvam') {
+                                          def = PROVIDER_DEFAULTS.sarvam;
+                                        } else if (value === 'deepgram') {
+                                          def = PROVIDER_DEFAULTS.deepgram;
+                                        } else {
+                                          def = { name: '', model: '', language: '' };
+                                        }
+                                        values.assistants[idx].stt = { ...def };
+                                        handleReset();
+                                      }}
+                                    >
+                                      <option value="">Select STT</option>
+                                      <option value="sarvam">sarvam</option>
+                                      <option value="deepgram">deepgram</option>
+                                    </Field>
+                                  </div>
+                                  {/* Only show fields for selected provider */}
+                                  {values.assistants[idx].stt.name === 'sarvam' && (
+                                    <>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Language</label>
+                                        <Field name={`assistants[${idx}].stt.language`} as="select" className="w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500">
+                                          <option value="hi-IN">Hindi (hi-IN)</option>
+                                          <option value="bn-IN">Bengali (bn-IN)</option>
+                                          <option value="ta-IN">Tamil (ta-IN)</option>
+                                          <option value="te-IN">Telugu (te-IN)</option>
+                                          <option value="gu-IN">Gujarati (gu-IN)</option>
+                                          <option value="kn-IN">Kannada (kn-IN)</option>
+                                          <option value="ml-IN">Malayalam (ml-IN)</option>
+                                          <option value="mr-IN">Marathi (mr-IN)</option>
+                                          <option value="pa-IN">Punjabi (pa-IN)</option>
+                                          <option value="od-IN">Odia (od-IN)</option>
+                                          <option value="en-IN">English (en-IN)</option>
+                                        </Field>
+                                      </div>
+                                      <div>
+                                        <label className="hidden text-sm font-semibold text-gray-700 mb-2">Model</label>
+                                        <Field name={`assistants[${idx}].stt.model`} as="input" className=" hidden w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                    </>
+                                  )}
+                                  {values.assistants[idx].stt.name === 'deepgram' && (
+                                    <>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Language</label>
+                                        <Field name={`assistants[${idx}].stt.language`} as="input" className="w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="hidden  text-sm font-semibold text-gray-700 mb-2">Model</label>
+                                        <Field name={`assistants[${idx}].stt.model`} as="input" className="hidden w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              {/* LLM Section */}
+                              <div className="mb-4">
+                                <h5 className="flex items-center text-md font-bold text-pink-700 mb-2 mt-4">
+                                  {sectionLabel(<Brain className="w-4 h-4 bg-pink-100 text-pink-600 rounded-full p-1" />, 'LLM (Language Model)')}
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Provider (only openai)</label>
+                                    <Field name={`assistants[${idx}].llm.name`} as="select" className="w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500">
+                                      <option value="openai">openai</option>
+                                    </Field>
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Model</label>
+                                    <Field name={`assistants[${idx}].llm.model`} as="input" className="w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Temperature</label>
+                                    <Field name={`assistants[${idx}].llm.temperature`} as="input" type="number" className="w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                  </div>
+                                </div>
+                              </div>
+                              {/* TTS Section */}
+                              <div className="mb-4">
+                                <h5 className="flex items-center text-md font-bold text-orange-700 mb-2 mt-4">
+                                  {sectionLabel(<Headphones className="w-4 h-4 bg-orange-100 text-orange-600 rounded-full p-1" />, 'TTS (Text-to-Speech)')}
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Provider</label>
+                                    <Field
+                                      name={`assistants[${idx}].tts.name`}
+                                      as="select"
+                                      className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500"
+                                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                                        const value = e.target.value as 'sarvam_tts' | 'elevenlabs';
+                                        let def;
+                                        if (value === 'elevenlabs') {
+                                          def = PROVIDER_DEFAULTS.elevenlabs;
+                                        } else if (value === 'sarvam_tts') {
+                                          def = PROVIDER_DEFAULTS.sarvam_tts;
+                                        } else {
+                                          def = PROVIDER_DEFAULTS.elevenlabs;
+                                        }
+                                        values.assistants[idx].tts = { ...def };
+                                        handleReset();
+                                      }}
+                                    >
+                                      <option value="">Select TTS</option>
+                                      <option value="elevenlabs">elevenlabs</option>
+                                      <option value="sarvam_tts">sarvam</option>
+                                    </Field>
+                                  </div>
+                                  {/* Only show fields for selected provider */}
+                                  {values.assistants[idx].tts.name === 'elevenlabs' && (
+                                    <>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Voice ID</label>
+                                        <Field name={`assistants[${idx}].tts.voice_id`} as="input" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Language</label>
+                                        <Field name={`assistants[${idx}].tts.language`} as="input" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Model</label>
+                                        <Field name={`assistants[${idx}].tts.model`} as="input" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      {/* Advanced fields for elevenlabs only */}
+                                      <div className="col-span-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => setTtsAdvancedOpen((prev) => ({ ...prev, [String(idx)]: !prev[String(idx)] }))}
+                                          className="mt-2 mb-4 px-4 py-2 bg-orange-100 text-orange-700 rounded-lg font-semibold shadow hover:bg-orange-200 transition"
+                                        >
+                                          {ttsAdvancedOpen[String(idx)] ? 'Hide' : 'Show'} Advanced Configuration
+                                        </button>
+                                        {ttsAdvancedOpen[String(idx)] && (
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-orange-50 border border-orange-200 rounded-xl p-4 mt-2">
+                                            <div>
+                                              <label className="block text-sm font-semibold text-gray-700 mb-2">Similarity Boost</label>
+                                              <Field name={`assistants[${idx}].tts.voice_settings.similarity_boost`} as="input" type="number" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-sm font-semibold text-gray-700 mb-2">Stability</label>
+                                              <Field name={`assistants[${idx}].tts.voice_settings.stability`} as="input" type="number" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-sm font-semibold text-gray-700 mb-2">Style</label>
+                                              <Field name={`assistants[${idx}].tts.voice_settings.style`} as="input" type="number" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-sm font-semibold text-gray-700 mb-2">Use Speaker Boost</label>
+                                              <Field name={`assistants[${idx}].tts.voice_settings.use_speaker_boost`} type="checkbox" className="mr-2" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-sm font-semibold text-gray-700 mb-2">Speed</label>
+                                              <Field name={`assistants[${idx}].tts.voice_settings.speed`} as="input" type="number" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </>
+                                  )}
+                                  {values.assistants[idx].tts.name === 'sarvam_tts' ? (
+                                    <>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Target Language Code</label>
+                                        <Field name={`assistants[${idx}].tts.target_language_code`} as="input" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Model</label>
+                                        <Field name={`assistants[${idx}].tts.model`} as="input" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Speaker</label>
+                                        <Field name={`assistants[${idx}].tts.speaker`} as="input" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Loudness</label>
+                                        <Field name={`assistants[${idx}].tts.loudness`} as="input" type="number" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Speed</label>
+                                        <Field name={`assistants[${idx}].tts.speed`} as="input" type="number" className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Enable Preprocessing</label>
+                                        <Field name={`assistants[${idx}].tts.enable_preprocessing`} type="checkbox" className="mr-2" />
+                                      </div>
+                                    </>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {/* VAD Section */}
+                              <div className="mb-4">
+                                <h5 className="flex items-center text-md font-bold text-cyan-700 mb-2 mt-4">
+                                  {sectionLabel(<Zap className="w-4 h-4 bg-cyan-100 text-cyan-600 rounded-full p-1" />, 'VAD (Voice Activity Detection)')}
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">VAD Name</label>
+                                    <Field name={`assistants[${idx}].vad.name`} as="input" className="w-full px-4 py-3 border-2 border-cyan-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">VAD Min Silence Duration</label>
+                                    <Field name={`assistants[${idx}].vad.min_silence_duration`} as="input" type="number" className="w-full px-4 py-3 border-2 border-cyan-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-700 placeholder-gray-500" />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </FieldArray>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Type</label>
-                  <select value={agentType ?? ''} onChange={e => setAgentType(e.target.value)} className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500">
-                    <option value="INBOUND">INBOUND</option>
-                    <option value="OUTBOUND">OUTBOUND</option>
-                  </select>
+                <div className="flex gap-4 mt-8">
+                  <button type="button" onClick={() => { handleReset(); onClose(); }} className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors">Cancel</button>
+                  <button type="submit" className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg">Create</button>
                 </div>
-              </div>
-            </div>
-            {/* Assistants Section */}
-            <div>
-              <h4 className="flex items-center text-xl font-bold text-purple-700 mb-4 border-b border-purple-200 pb-2 justify-between">
-                <span>{sectionIcon(<Users className="w-5 h-5" />, 'bg-purple-100 text-purple-600')}Assistants</span>
-                <button type="button" onClick={addAssistant} className="ml-4 px-5 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold shadow-lg hover:scale-105 transition-transform">+ Add Assistant</button>
-              </h4>
-              {assistants.map((assistant, idx) => (
-                <div key={idx} className="mb-10 border border-purple-200 rounded-2xl p-6 bg-purple-50/60 relative shadow-md">
-                  {assistants.length > 1 && (
-                    <button type="button" onClick={() => removeAssistant(idx)} className="absolute top-3 right-3 text-red-500 hover:text-red-700 font-bold text-2xl bg-white rounded-full w-8 h-8 flex items-center justify-center shadow-md">&times;</button>
-                  )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Assistant Name</label>
-                      <input type="text" value={assistant.name ?? ''} onChange={e => handleAssistantChange(idx, 'name', e.target.value)} className="w-full px-4 py-3 border-2 border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                    </div>
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Assistant Prompt</label>
-                    <textarea value={assistant.prompt ?? ''} onChange={e => handleAssistantChange(idx, 'prompt', e.target.value)} rows={6} className="w-full px-4 py-3 border-2 border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent bg-white transition-shadow hover:shadow-md resize-y min-h-[120px] text-gray-900 placeholder-gray-500" />
-                  </div>
-                  {/* STT Section */}
-                  <div className="mb-4">
-                    <h5 className="flex items-center text-md font-bold text-green-700 mb-2 mt-4">
-                      {sectionIcon(<Mic className="w-4 h-4" />, 'bg-green-100 text-green-600')}STT (Speech-to-Text)
-                    </h5>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">STT Name</label>
-                        <input type="text" value={assistant.stt.name ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'stt', 'name', e.target.value)} className="w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">STT Language</label>
-                        <input type="text" value={assistant.stt.language ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'stt', 'language', e.target.value)} className="w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">STT Model</label>
-                        <input type="text" value={assistant.stt.model ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'stt', 'model', e.target.value)} className="w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                    </div>
-                  </div>
-                  {/* LLM Section */}
-                  <div className="mb-4">
-                    <h5 className="flex items-center text-md font-bold text-pink-700 mb-2 mt-4">
-                      {sectionIcon(<Brain className="w-4 h-4" />, 'bg-pink-100 text-pink-600')}LLM (Language Model)
-                    </h5>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">LLM Name</label>
-                        <input type="text" value={assistant.llm.name ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'llm', 'name', e.target.value)} className="w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">LLM Model</label>
-                        <input type="text" value={assistant.llm.model ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'llm', 'model', e.target.value)} className="w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">LLM Temperature</label>
-                        <input type="number" step="0.01" value={assistant.llm.temperature ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'llm', 'temperature', e.target.value)} className="w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                    </div>
-                  </div>
-                  {/* TTS Section */}
-                  <div className="mb-4">
-                    <h5 className="flex items-center text-md font-bold text-orange-700 mb-2 mt-4">
-                      {sectionIcon(<Headphones className="w-4 h-4" />, 'bg-orange-100 text-orange-600')}TTS (Text-to-Speech)
-                    </h5>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Name</label>
-                        <input type="text" value={assistant.tts.name ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'tts', 'name', e.target.value)} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Voice ID</label>
-                        <input type="text" value={assistant.tts.voice_id ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'tts', 'voice_id', e.target.value)} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Language</label>
-                        <input type="text" value={assistant.tts.language ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'tts', 'language', e.target.value)} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Model</label>
-                        <input type="text" value={assistant.tts.model ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'tts', 'model', e.target.value)} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Similarity Boost</label>
-                        <input type="number" step="0.01" value={assistant.tts.voice_settings.similarity_boost ?? ''} onChange={e => handleAssistantTTSVoiceSettingsChange(idx, 'similarity_boost', Number(e.target.value))} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Stability</label>
-                        <input type="number" step="0.01" value={assistant.tts.voice_settings.stability ?? ''} onChange={e => handleAssistantTTSVoiceSettingsChange(idx, 'stability', Number(e.target.value))} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Style</label>
-                        <input type="number" step="0.01" value={assistant.tts.voice_settings.style ?? ''} onChange={e => handleAssistantTTSVoiceSettingsChange(idx, 'style', Number(e.target.value))} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Use Speaker Boost</label>
-                        <input type="checkbox" checked={assistant.tts.voice_settings.use_speaker_boost} onChange={e => handleAssistantTTSVoiceSettingsChange(idx, 'use_speaker_boost', e.target.checked)} className="mr-2" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">TTS Speed</label>
-                        <input type="number" step="0.01" value={assistant.tts.voice_settings.speed ?? ''} onChange={e => handleAssistantTTSVoiceSettingsChange(idx, 'speed', Number(e.target.value))} className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                    </div>
-                  </div>
-                  {/* VAD Section */}
-                  <div className="mb-4">
-                    <h5 className="flex items-center text-md font-bold text-cyan-700 mb-2 mt-4">
-                      {sectionIcon(<Zap className="w-4 h-4" />, 'bg-cyan-100 text-cyan-600')}VAD (Voice Activity Detection)
-                    </h5>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">VAD Name</label>
-                        <input type="text" value={assistant.vad.name ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'vad', 'name', e.target.value)} className="w-full px-4 py-3 border-2 border-cyan-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">VAD Min Silence Duration</label>
-                        <input type="number" step="0.01" value={assistant.vad.min_silence_duration ?? ''} onChange={e => handleAssistantSubfieldChange(idx, 'vad', 'min_silence_duration', e.target.value)} className="w-full px-4 py-3 border-2 border-cyan-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent bg-white transition-shadow hover:shadow-md text-gray-900 placeholder-gray-500" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="flex gap-4 mt-8">
-            <button onClick={handleClose} className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors">Cancel</button>
-            <button onClick={handleCreate} className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg">Create</button>
-          </div>
+              </Form>
+            )}
+          </Formik>
         </div>
       </div>
     );
@@ -630,6 +802,52 @@ const Dashboard = () => {
     );
   };
 
+  // Template selection modal
+  const TemplateModal = ({ show, onClose }: { show: boolean; onClose: () => void }) => {
+    if (!show) return null;
+    return (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+          <h3 className="text-xl font-bold mb-6 text-gray-800">Choose Agent Type</h3>
+          <div className="space-y-4 mb-8">
+            {agentTemplates.map(tmpl => (
+              <button
+                key={tmpl.key}
+                className="w-full px-6 py-4 rounded-xl border border-gray-200 bg-gray-50 hover:bg-blue-100 text-lg font-semibold transition text-gray-700"
+                onClick={() => {
+                  if (tmpl.agent) {
+                    setAgentName(tmpl.agent.name);
+                    setAgentType(tmpl.agent.type);
+                    setAssistants(tmpl.agent.assistant);
+                  } else {
+                    // Only reset to default if custom agent is selected
+                    setAgentName('Agent');
+                    setAgentType('INBOUND');
+                    setAssistants([
+                      {
+                        name: 'Neha',
+                        prompt: 'You are a helpful agent...',
+                        stt: { name: 'sarvam', language: 'en-IN', model: 'saarika:v2.5' },
+                        llm: { name: 'openai', model: 'gpt-4.1-mini', temperature: 0.3 },
+                        tts: { ...PROVIDER_DEFAULTS.elevenlabs },
+                        vad: { name: 'silero', min_silence_duration: 0.2 }
+                      }
+                    ]);
+                  }
+                  setShowTemplateModal(false);
+                  setShowCreateModal(true);
+                }}
+              >
+                {tmpl.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={onClose} className="w-full py-2 rounded-xl bg-gray-200 hover:bg-gray-300 font-medium text-gray-700">Cancel</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 relative overflow-hidden">
       {/* Animated Background Elements */}
@@ -657,7 +875,7 @@ const Dashboard = () => {
             
             <div className="flex items-center gap-4">
               <button
-                onClick={() => setShowCreateModal(true)}
+                onClick={() => setShowTemplateModal(true)}
                 className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium hover:from-emerald-600 hover:to-emerald-700 transform hover:scale-105 transition-all duration-300 shadow-lg"
               >
                 <Plus className="w-5 h-5" />
@@ -725,7 +943,7 @@ const Dashboard = () => {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">No Agents Deployed</h3>
               <p className="text-gray-600 mb-8">Create your first intelligent voice agent to get started</p>
               <button
-                onClick={() => setShowCreateModal(true)}
+                onClick={() => setShowTemplateModal(true)}
                 className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg"
               >
                 Create First Agent
@@ -736,9 +954,85 @@ const Dashboard = () => {
       </div>
 
       {/* Modals */}
+      <TemplateModal
+        show={showTemplateModal}
+        onClose={() => setShowTemplateModal(false)}
+      />
       <CreateAgentModal
         show={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        onClose={() => {
+          setShowCreateModal(false);
+        }}
+        agentName={agentName}
+        agentType={agentType}
+        assistants={assistants}
+        onCreate={async (values: { agentName: string; agentType: string; assistants: Assistant[] }) => {
+          const agent = {
+            name: typeof values.agentName === 'string' ? values.agentName.toLowerCase().replace(/\s+/g, '_') : values.agentName,
+            type: values.agentType,
+            assistant: values.assistants.map((assistant: Assistant) => {
+              let tts;
+              if (assistant.tts.name === 'elevenlabs') {
+                tts = {
+                  name: 'elevenlabs',
+                  voice_id: (assistant.tts as AssistantTTS).voice_id,
+                  model: (assistant.tts as AssistantTTS).model,
+                  language: (assistant.tts as AssistantTTS).language,
+                  voice_settings: { ...(assistant.tts as AssistantTTS).voice_settings }
+                };
+              } else if (assistant.tts.name === 'sarvam_tts') {
+                tts = {
+                  name: 'sarvam_tts',
+                  target_language_code: (assistant.tts as AssistantTTS).target_language_code,
+                  model: (assistant.tts as AssistantTTS).model,
+                  speaker: (assistant.tts as AssistantTTS).speaker,
+                  loudness: (assistant.tts as AssistantTTS).loudness,
+                  speed: (assistant.tts as AssistantTTS).speed,
+                  enable_preprocessing: (assistant.tts as AssistantTTS).enable_preprocessing
+                };
+              } else {
+                tts = assistant.tts;
+              }
+              return {
+                ...assistant,
+                tts
+              };
+            })
+          };
+          const endpoint = values.agentType === 'OUTBOUND'
+            ? '/api/create-outbound-agent'
+            : '/api/create-inbound-agent';
+          try {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agent })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            showNotification('Agent created successfully', 'success');
+            fetchAgents();
+            fetchRunningAgents();
+            setAgentName('Agent');
+            setAgentType('INBOUND');
+            setAssistants([
+              {
+                name: 'Neha',
+                prompt: 'You are a helpful agent...',
+                stt: { name: 'sarvam', language: 'en-In', model: 'saarika:v2.5' },
+                llm: { name: 'openai', model: 'gpt-4.1-mini', temperature: 0.3 },
+                tts: { ...PROVIDER_DEFAULTS.elevenlabs },
+                vad: { name: 'silero', min_silence_duration: 0.2 }
+              }
+            ]);
+            setShowCreateModal(false);
+          } catch (err: unknown) {
+            if (err instanceof Error) {
+              showNotification(`Failed to create agent: ${err.message}`, 'error');
+            } else {
+              showNotification('Failed to create agent', 'error');
+            }
+          }
+        }}
       />
       <DispatchModal
         show={showDispatchModal}
