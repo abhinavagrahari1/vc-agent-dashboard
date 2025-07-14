@@ -103,7 +103,8 @@ const PROVIDER_DEFAULTS = {
 
 // LiveKit call component for agent interaction
 const serverUrl = 'wss://demo-v2-1p2g80wt.livekit.cloud';
-const apiUrl = 'http://127.0.0.1:8000';
+const apiUrl= 'http://13.233.50.22:8000'
+// const apiUrl = 'http://127.0.0.1:8000';
 
 function AgentLiveKitCall({ agentName, userName, onEnd }: { agentName: string; userName: string; onEnd: () => void }) {
   const [token, setToken] = useState<string | null>(null);
@@ -252,7 +253,7 @@ function ConfigureInboundModal({ show, onClose, agentName }: { show: boolean; on
         trunkIds,
         name: agentName
       };
-      const res = await fetch('http://127.0.0.1:8000/replace_dispatch_rule', {
+      const res = await fetch('http://13.233.50.22:8000/replace_dispatch_rule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
