@@ -1,8 +1,19 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Play, Square, Zap, Phone, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, ArrowDownLeft, ArrowUpRight
+  Play, Square, Zap, Phone, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, ArrowDownLeft, ArrowUpRight, Settings, Clipboard, Check as CheckIcon, Pencil
 } from 'lucide-react';
+import {
+  ControlBar,
+  GridLayout,
+  ParticipantTile,
+  RoomAudioRenderer,
+  useTracks,
+  RoomContext,
+  TrackReferenceOrPlaceholder,
+} from '@livekit/components-react';
+import { Room, Track } from 'livekit-client';
+import '@livekit/components-styles';
 import { APPOINTMENT_SCHEDULAR } from '../utils/appointment_schedular';
 import { CUSTOMER_SUPPORT_SPECIALIST } from '../utils/customer_support_specialist';
 import { CARE_COORDINATOR } from '../utils/care_coordinator';
@@ -57,7 +68,7 @@ const PROVIDER_DEFAULTS = {
     name: 'elevenlabs',
     voice_id: 'H8bdWZHK2OgZwTN7ponr',
     model: 'eleven_flash_v2_5',
-    language: 'en-US',
+    language: 'en',
     voice_settings: {
       similarity_boost: 1,
       stability: 0.7,
@@ -82,9 +93,443 @@ const PROVIDER_DEFAULTS = {
   },
   deepgram: {
     name: 'deepgram',
-    model: 'alex',
-    language: 'en-US'
+    model: 'nova-2',
+    language: 'en'
   }
+};
+
+// LiveKit call component for agent interaction
+const serverUrl = 'wss://demo-v2-1p2g80wt.livekit.cloud';
+const apiUrl = 'http://127.0.0.1:8000';
+
+function AgentLiveKitCall({ agentName, userName, onEnd }: { agentName: string; userName: string; onEnd: () => void }) {
+  const [token, setToken] = useState<string | null>(null);
+  const [room] = useState(() => new Room({ adaptiveStream: true, dynacast: true }));
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Listen for room disconnect to trigger onEnd (for leave button)
+  useEffect(() => {
+    const handleDisconnect = () => {
+      onEnd();
+    };
+    room.on('disconnected', handleDisconnect);
+    return () => {
+      room.off('disconnected', handleDisconnect);
+    };
+  }, [room, onEnd]);
+
+  // Fetch token and connect on mount
+  useEffect(() => {
+    let mounted = true;
+    const fetchTokenAndConnect = async () => {
+      setConnecting(true);
+      setError(null);
+      try {
+        const res = await fetch(`${apiUrl}/start_web_session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_identity: userName,
+            user_name: userName,
+            agent_name: agentName,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const data = await res.json();
+        if (!data.user_token) throw new Error('No token received');
+        if (mounted) setToken(data.user_token);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to connect');
+      } finally {
+        setConnecting(false);
+      }
+    };
+    fetchTokenAndConnect();
+    return () => {
+      mounted = false;
+      room.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentName, userName]);
+
+  // Connect to room when token is available
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const connect = async () => {
+      try {
+        await room.connect(serverUrl, token);
+      } catch (err) {
+        if (!cancelled) setError('Failed to connect to LiveKit');
+      }
+    };
+    connect();
+    return () => {
+      cancelled = true;
+      room.disconnect();
+    };
+  }, [room, token]);
+
+  // End call handler
+  const handleEndCall = () => {
+    room.disconnect();
+    onEnd();
+  };
+
+  if (error) {
+    return (
+      <div className="p-4 bg-red-100 text-red-700 rounded-xl mt-4">
+        Error: {error}
+        <button onClick={onEnd} className="ml-4 px-3 py-1 bg-gray-200 rounded">Close</button>
+      </div>
+    );
+  }
+
+  if (connecting || !token) {
+    return <div className="p-4 bg-blue-100 text-blue-700 rounded-xl mt-4">Connecting to agent...</div>;
+  }
+
+  return (
+    <RoomContext.Provider value={room}>
+      <div data-lk-theme="default" className="mt-4 border rounded-xl p-4 bg-white/90 flex flex-col items-center gap-4">
+        <span className="font-semibold text-gray-800">Talking to Agent...</span>
+        {/* <MyVideoConference /> */}
+        <RoomAudioRenderer />
+        <ControlBar
+          controls={{
+            microphone: true,
+            camera: false,
+            screenShare: false,
+            chat: false,
+            leave: true,
+            settings: false,
+          }}
+        />
+      </div>
+    </RoomContext.Provider>
+  );
+}
+
+function MyVideoConference() {
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.ScreenShare, withPlaceholder: false },
+    ],
+    { onlySubscribed: false },
+  );
+  return (
+    <GridLayout
+      tracks={tracks}
+      style={{ height: '180px' }}
+    >
+      {((trackRef: TrackReferenceOrPlaceholder) => ParticipantTile({ trackRef })) as any}
+    </GridLayout>
+  );
+}
+
+// ConfigureInboundModal component
+function ConfigureInboundModal({ show, onClose, agentName }: { show: boolean; onClose: () => void; agentName: string }) {
+  const [rules, setRules] = useState<{ dispatch_rule_id: string; numbers: string[]; agent_name?: string; sip_trunk_id?: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [inputId, setInputId] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!show) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    fetch('http://127.0.0.1:8000/dispatch_rule_numbers')
+      .then(res => res.json())
+      .then(data => setRules(data.dispatch_rule_numbers || []))
+      .catch(() => setError('Failed to fetch dispatch rules'))
+      .finally(() => setLoading(false));
+  }, [show]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      // Find the selected rule to get its sip_trunk_id
+      const selectedRule = rules.find(rule => rule.dispatch_rule_id === inputId);
+      const trunkIds = selectedRule && selectedRule.sip_trunk_id ? selectedRule.sip_trunk_id : ['ST_2vURqaLd675N'];
+      const payload = {
+        dispatch_rule_id: inputId,
+        room_prefix: 'call-',
+        agent_name: agentName,
+        metadata: JSON.stringify({ source: 'phone', agent_name: agentName }),
+        trunkIds,
+        name: agentName
+      };
+      const res = await fetch('http://127.0.0.1:8000/replace_dispatch_rule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('Failed to update dispatch rule');
+      setSuccess('Dispatch rule updated successfully!');
+      setInputId('');
+    } catch (err) {
+      setError('Failed to update dispatch rule');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCopy = (id: string) => {
+    console.log('Copying:', id);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(id)
+        .then(() => {
+          setCopiedId(id);
+          setTimeout(() => setCopiedId(null), 1200);
+        })
+        .catch(() => {
+          // fallback
+          const tempInput = document.createElement('input');
+          tempInput.value = id;
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          document.execCommand('copy');
+          document.body.removeChild(tempInput);
+          setCopiedId(id);
+          setTimeout(() => setCopiedId(null), 1200);
+        });
+    } else {
+      // fallback
+      const tempInput = document.createElement('input');
+      tempInput.value = id;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      document.execCommand('copy');
+      document.body.removeChild(tempInput);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1200);
+    }
+  };
+
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-gray-900 rounded-2xl shadow-2xl p-10 w-full max-w-2xl relative text-white">
+        <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-gray-800 hover:bg-gray-700 flex items-center justify-center transition-colors">
+          <X className="w-5 h-5 text-gray-300" />
+        </button>
+        <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Settings className="w-5 h-5 text-blue-400" /> Configure Inbound for <span className="text-blue-300">{agentName}</span></h3>
+        {loading ? (
+          <div className="text-blue-300">Loading...</div>
+        ) : error ? (
+          <div className="text-red-400 mb-4">{error}</div>
+        ) : (
+          <>
+            <table className="w-full mb-6 text-sm border border-gray-700 rounded overflow-hidden">
+              <thead>
+                <tr className="bg-gray-800">
+                  <th className="px-3 py-2 text-left text-gray-300 truncate max-w-[120px] overflow-hidden whitespace-nowrap">Dispatch Rule ID</th>
+                  <th className="px-3 py-2 text-left text-gray-300 truncate max-w-[120px] overflow-hidden whitespace-nowrap">Numbers</th>
+                  <th className="px-3 py-2 text-left text-gray-300 truncate max-w-[120px] overflow-hidden whitespace-nowrap">Agent Name</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map(rule => (
+                  <tr key={rule.dispatch_rule_id} className="border-t border-gray-700">
+                    <td className="px-3 py-2 font-mono text-gray-100">{rule.dispatch_rule_id}</td>
+                    <td className="px-3 py-2 text-gray-200 truncate max-w-[120px] overflow-hidden whitespace-nowrap">{rule.numbers.join(', ')}</td>
+                    <td
+                      className="px-3 py-2 text-gray-200 truncate max-w-[180px] overflow-hidden whitespace-nowrap"
+                      title={rule.agent_name}
+                    >
+                      {rule.agent_name && rule.agent_name.length > 30
+                        ? rule.agent_name.slice(0, 27) + '...'
+                        : rule.agent_name || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3 mt-4">
+              <label className="font-medium text-gray-200">Input dispatch rule id</label>
+              <input
+                type="text"
+                value={inputId}
+                onChange={e => setInputId(e.target.value)}
+                placeholder="Input dispatch rule id"
+                className="px-4 py-2 border border-gray-700 rounded bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400"
+                required
+              />
+              <button
+                type="submit"
+                disabled={submitting || !inputId}
+                className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? 'Submitting...' : 'Submit'}
+              </button>
+              {success && <div className="text-green-400 mt-2">{success}</div>}
+              {error && <div className="text-red-400 mt-2">{error}</div>}
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Move AgentCard definition here so it is in scope for Dashboard
+const AgentCard = ({ agent, isAgentRunning, runningAgents, runAgent, stopAgent, loading, setSelectedAgent, setShowDispatchModal, onOpenConfigureInbound, onEditAgent }: {
+  agent: Agent;
+  isAgentRunning: (name: string) => boolean;
+  runningAgents: RunningAgent[];
+  runAgent: (name: string) => void;
+  stopAgent: (name: string) => void;
+  loading: boolean;
+  setSelectedAgent: (name: string) => void;
+  setShowDispatchModal: (show: boolean) => void;
+  onOpenConfigureInbound: () => void;
+  onEditAgent: (agentName: string) => void;
+}) => {
+  const running = isAgentRunning(agent.name);
+  const runningAgent = runningAgents.find((ra: RunningAgent) => ra.agent_name === agent.name);
+  const [showCall, setShowCall] = useState(false);
+  const [userName] = useState('user_' + Math.floor(Math.random() * 10000));
+
+  return (
+    <div
+      className="group relative overflow-hidden bg-white/80 backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-white/20 hover:shadow-3xl hover:scale-105 transition-all duration-500"
+      style={{ maxHeight: 600, display: 'flex', flexDirection: 'column' }}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent"></div>
+      <div className="relative z-10 flex-1 flex flex-col">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className={`w-4 h-4 rounded-full ${running ? 'bg-emerald-500' : 'bg-gray-400'} shadow-lg`}></div>
+              {running && (
+                <div className="absolute inset-0 w-4 h-4 rounded-full bg-emerald-500 animate-ping"></div>
+              )}
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">
+                <span
+                  className="truncate max-w-[200px] block overflow-hidden"
+                  title={agent.name}
+                >
+                  {agent.name.length > 30 ? agent.name.slice(0, 27) + '...' : agent.name}
+                </span>
+              </h3>
+              <p className="text-sm text-gray-600">Voice Agent</p>
+            </div>
+          </div>
+          {/* Configure Inbound button */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenConfigureInbound}
+              className="ml-2 p-2 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-700 flex items-center justify-center"
+              title="Configure Inbound"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+            {/* Edit Agent button */}
+            <button
+              onClick={() => onEditAgent(agent.name)}
+              className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center"
+              title="Edit Agent"
+            >
+              <Pencil className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        <div className="space-y-4 mb-6">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium text-gray-600">Status</span>
+            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
+              running ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${running ? 'bg-emerald-500' : 'bg-gray-400'}`}></div>
+              {running ? 'Active' : 'Inactive'}
+            </div>
+          </div>
+          {running && runningAgent && (
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-gray-600">Process ID</span>
+              <span className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">{runningAgent.pid}</span>
+            </div>
+          )}
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium text-gray-600">Config</span>
+            <span className="text-xs text-gray-500 truncate ml-2 max-w-32">{agent.config_path?.split('/').pop()}</span>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          {running ? (
+            <button
+              onClick={() => stopAgent(agent.name)}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-medium hover:from-red-600 hover:to-red-700 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 shadow-lg"
+            >
+              <Square className="w-4 h-4" />
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={() => runAgent(agent.name)}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium hover:from-emerald-600 hover:to-emerald-700 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 shadow-lg"
+            >
+              <Play className="w-4 h-4" />
+              Start
+            </button>
+          )}
+          {/* Only show call dispatch for OUTBOUND agents that are running */}
+          {running && (
+            <button
+              onClick={() => {
+                setSelectedAgent(agent.name);
+                setShowDispatchModal(true);
+              }}
+              className="px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg"
+            >
+              <Phone className="w-4 h-4" />
+            </button>
+          )}
+          {/* Talk to Agent button, only if running and not already in call */}
+          {running && !showCall && (
+            <button
+              onClick={() => setShowCall(true)}
+              className="px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-medium hover:from-blue-600 hover:to-purple-700 transform hover:scale-105 transition-all duration-300 shadow-lg"
+            >
+              Talk to Agent
+            </button>
+          )}
+        </div>
+        {/* LiveKit call UI, only if showCall is true */}
+        {showCall && (
+          <div
+            style={{
+              maxHeight: 320,
+              overflowY: 'auto',
+              background: '#f8fafc',
+              borderRadius: '1rem',
+              marginTop: '1rem',
+              padding: '1rem',
+            }}
+          >
+            <AgentLiveKitCall
+              agentName={agent.name}
+              userName={userName}
+              onEnd={() => setShowCall(false)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const Dashboard = () => {
@@ -97,6 +542,8 @@ const Dashboard = () => {
   const [selectedAgent, setSelectedAgent] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: string } | null>(null);
+  const [editAgentModalOpen, setEditAgentModalOpen] = useState(false);
+  const [editAgentInitialValues, setEditAgentInitialValues] = useState<any>(null);
 
   // Add preset agent templates
   const agentTemplates = [
@@ -136,6 +583,10 @@ const Dashboard = () => {
     tts: { ...PROVIDER_DEFAULTS.elevenlabs },
     vad: { name: 'silero', min_silence_duration: 0.2 }
   }]);
+
+  // Add state for configure inbound modal
+  const [showConfigureInbound, setShowConfigureInbound] = useState(false);
+  const [configureInboundAgent, setConfigureInboundAgent] = useState<string | null>(null);
 
   // Add error handling for API calls
   const fetchWithErrorHandling = async (url: string, options = {}) => {
@@ -222,6 +673,22 @@ const Dashboard = () => {
     setLoading(false);
   };
 
+  const handleEditAgent = async (agentName: string) => {
+    try {
+      const res = await fetch(`http://localhost:8000/agent_config/${agentName}`);
+      if (!res.ok) throw new Error('Failed to fetch agent config');
+      const config = await res.json();
+      setEditAgentInitialValues({
+        agentName: config.agent.name,
+        agentType: config.agent.type || 'INBOUND',
+        assistants: config.agent.assistant,
+      });
+      setEditAgentModalOpen(true);
+    } catch (err) {
+      showNotification('Failed to fetch agent config', 'error');
+    }
+  };
+
   // Memoize the dispatch call function
   const dispatchCall = useCallback(async () => {
     if (!selectedAgent || !phoneNumber) {
@@ -276,112 +743,15 @@ const Dashboard = () => {
     </div>
   );
 
-  const AgentCard = ({ agent }: { agent: Agent }) => {
-    const running = isAgentRunning(agent.name);
-    const runningAgent = runningAgents.find((ra: RunningAgent) => ra.agent_name === agent.name);
-    
-    // Use agent.type directly from API
-    const typeBadge = agent.type === 'INBOUND' ? (
-      <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
-        <ArrowDownLeft className="w-4 h-4" /> Inbound
-      </div>
-    ) : (
-      <div className="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
-        <ArrowUpRight className="w-4 h-4" /> Outbound
-      </div>
-    );
-    
-    return (
-      <div className="group relative overflow-hidden bg-white/80 backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-white/20 hover:shadow-3xl hover:scale-105 transition-all duration-500">
-        <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent"></div>
-        <div className="relative z-10">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <div className={`w-4 h-4 rounded-full ${running ? 'bg-emerald-500' : 'bg-gray-400'} shadow-lg`}></div>
-                {running && (
-                  <div className="absolute inset-0 w-4 h-4 rounded-full bg-emerald-500 animate-ping"></div>
-                )}
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">{agent.name}</h3>
-                <p className="text-sm text-gray-600">Voice Agent</p>
-                {typeBadge}
-              </div>
-            </div>
-          </div>
-          
-          <div className="space-y-4 mb-6">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium text-gray-600">Status</span>
-              <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
-                running ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${running ? 'bg-emerald-500' : 'bg-gray-400'}`}></div>
-                {running ? 'Active' : 'Inactive'}
-              </div>
-            </div>
-            
-            {running && runningAgent && (
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-600">Process ID</span>
-                <span className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">{runningAgent.pid}</span>
-              </div>
-            )}
-            
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium text-gray-600">Config</span>
-              <span className="text-xs text-gray-500 truncate ml-2 max-w-32">{agent.config_path?.split('/').pop()}</span>
-            </div>
-          </div>
-          
-          <div className="flex gap-3">
-            {running ? (
-              <button
-                onClick={() => stopAgent(agent.name)}
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-medium hover:from-red-600 hover:to-red-700 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 shadow-lg"
-              >
-                <Square className="w-4 h-4" />
-                Stop
-              </button>
-            ) : (
-              <button
-                onClick={() => runAgent(agent.name)}
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium hover:from-emerald-600 hover:to-emerald-700 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 shadow-lg"
-              >
-                <Play className="w-4 h-4" />
-                Start
-              </button>
-            )}
-            
-            {/* Only show call dispatch for OUTBOUND agents that are running */}
-            {running && agent.type === 'OUTBOUND' && (
-              <button
-                onClick={() => {
-                  setSelectedAgent(agent.name);
-                  setShowDispatchModal(true);
-                }}
-                className="px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg"
-              >
-                <Phone className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // Formik-based CreateAgentModal for creating a new agent with nested assistant fields
-  const CreateAgentModal = ({ show, onClose, agentName, agentType, assistants, onCreate }: {
+  const CreateAgentModal = ({ show, onClose, agentName, agentType, assistants, onCreate, isEdit }: {
     show: boolean;
     onClose: () => void;
     agentName: string;
     agentType: string;
     assistants: Assistant[];
     onCreate: (values: { agentName: string; agentType: string; assistants: Assistant[] }) => void;
+    isEdit?: boolean;
   }) => {
     // Always call hooks at the top
     const [ttsAdvancedOpen, setTtsAdvancedOpen] = useState<Record<string, boolean>>({});
@@ -723,7 +1093,9 @@ const Dashboard = () => {
                 </div>
                 <div className="flex gap-4 mt-8">
                   <button type="button" onClick={() => { handleReset(); onClose(); }} className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors">Cancel</button>
-                  <button type="submit" className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg">Create</button>
+                  <button type="submit" className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg">
+                    {isEdit ? 'Update' : 'Create'}
+                  </button>
                 </div>
               </Form>
             )}
@@ -808,7 +1180,7 @@ const Dashboard = () => {
     return (
       <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
         <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-          <h3 className="text-xl font-bold mb-6 text-gray-800">Choose Agent Type</h3>
+          <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Settings className="w-5 h-5 text-blue-400" /> Choose Agent Type</h3>
           <div className="space-y-4 mb-8">
             {agentTemplates.map(tmpl => (
               <button
@@ -931,7 +1303,22 @@ const Dashboard = () => {
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {agents.map(agent => (
-              <AgentCard key={agent.name} agent={agent} />
+              <AgentCard
+                key={agent.name}
+                agent={agent}
+                isAgentRunning={isAgentRunning}
+                runningAgents={runningAgents}
+                runAgent={runAgent}
+                stopAgent={stopAgent}
+                loading={loading}
+                setSelectedAgent={setSelectedAgent}
+                setShowDispatchModal={setShowDispatchModal}
+                onOpenConfigureInbound={() => {
+                  setConfigureInboundAgent(agent.name);
+                  setShowConfigureInbound(true);
+                }}
+                onEditAgent={handleEditAgent}
+              />
             ))}
           </div>
           
@@ -960,9 +1347,7 @@ const Dashboard = () => {
       />
       <CreateAgentModal
         show={showCreateModal}
-        onClose={() => {
-          setShowCreateModal(false);
-        }}
+        onClose={() => setShowCreateModal(false)}
         agentName={agentName}
         agentType={agentType}
         assistants={assistants}
@@ -1000,8 +1385,8 @@ const Dashboard = () => {
             })
           };
           const endpoint = values.agentType === 'OUTBOUND'
-            ? '/api/create-outbound-agent'
-            : '/api/create-inbound-agent';
+            ? '/api/create-agent'
+            : '/api/create-agent';
           try {
             const response = await fetch(endpoint, {
               method: 'POST',
@@ -1033,10 +1418,80 @@ const Dashboard = () => {
             }
           }
         }}
+        isEdit={false}
+      />
+      <CreateAgentModal
+        show={editAgentModalOpen}
+        onClose={() => setEditAgentModalOpen(false)}
+        agentName={editAgentInitialValues?.agentName || ''}
+        agentType={editAgentInitialValues?.agentType || 'INBOUND'}
+        assistants={editAgentInitialValues?.assistants || []}
+        onCreate={async (values: { agentName: string; agentType: string; assistants: Assistant[] }) => {
+          const agent = {
+            name: typeof values.agentName === 'string' ? values.agentName.toLowerCase().replace(/\s+/g, '_') : values.agentName,
+            type: values.agentType,
+            assistant: values.assistants.map((assistant: Assistant) => {
+              let tts;
+              if (assistant.tts.name === 'elevenlabs') {
+                tts = {
+                  name: 'elevenlabs',
+                  voice_id: (assistant.tts as AssistantTTS).voice_id,
+                  model: (assistant.tts as AssistantTTS).model,
+                  language: (assistant.tts as AssistantTTS).language,
+                  voice_settings: { ...(assistant.tts as AssistantTTS).voice_settings }
+                };
+              } else if (assistant.tts.name === 'sarvam_tts') {
+                tts = {
+                  name: 'sarvam_tts',
+                  target_language_code: (assistant.tts as AssistantTTS).target_language_code,
+                  model: (assistant.tts as AssistantTTS).model,
+                  speaker: (assistant.tts as AssistantTTS).speaker,
+                  loudness: (assistant.tts as AssistantTTS).loudness,
+                  speed: (assistant.tts as AssistantTTS).speed,
+                  enable_preprocessing: (assistant.tts as AssistantTTS).enable_preprocessing
+                };
+              } else {
+                tts = assistant.tts;
+              }
+              return {
+                ...assistant,
+                tts
+              };
+            })
+          };
+          const endpoint = values.agentType === 'OUTBOUND'
+            ? '/api/create-agent'
+            : '/api/create-agent';
+          try {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agent })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            showNotification('Agent updated successfully', 'success');
+            fetchAgents();
+            fetchRunningAgents();
+            setEditAgentModalOpen(false);
+          } catch (err: unknown) {
+            if (err instanceof Error) {
+              showNotification(`Failed to update agent: ${err.message}`, 'error');
+            } else {
+              showNotification('Failed to update agent', 'error');
+            }
+          }
+        }}
+        isEdit={true}
       />
       <DispatchModal
         show={showDispatchModal}
         onClose={() => setShowDispatchModal(false)}
+      />
+      {/* ConfigureInboundModal rendered at Dashboard level */}
+      <ConfigureInboundModal
+        show={showConfigureInbound}
+        onClose={() => setShowConfigureInbound(false)}
+        agentName={configureInboundAgent || ''}
       />
       
       {/* Notification */}

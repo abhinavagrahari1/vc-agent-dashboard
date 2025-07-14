@@ -128,7 +128,7 @@ Remember that your ultimate goal is to resolve customer issues efficiently while
         `,
         stt: { name: 'sarvam', language: 'en-IN', model: 'saarika:v2.5' },
         llm: { name: 'openai', model: 'gpt-4.1-mini', temperature: 0.3 },
-        tts: { name: 'elevenlabs', voice_id: 'H8bdWZHK2OgZwTN7ponr', language: 'en-US', model: 'eleven_flash_v2_5', voice_settings: { similarity_boost: 1, stability: 0.7, style: 0.7, use_speaker_boost: false, speed: 1.1 } },
+        tts: { name: 'elevenlabs', voice_id: 'H8bdWZHK2OgZwTN7ponr', language: 'en', model: 'eleven_flash_v2_5', voice_settings: { similarity_boost: 1, stability: 0.7, style: 0.7, use_speaker_boost: false, speed: 1.1 } },
         vad: { name: 'silero', min_silence_duration: 0.2 }
       }]
     }

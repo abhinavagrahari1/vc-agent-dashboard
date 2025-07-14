@@ -5,7 +5,7 @@ const API_BASE = 'http://127.0.0.1:8000';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const res = await fetch(`${API_BASE}/stop_agent`, {
+  const res = await fetch(`${API_BASE}/create-agent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
