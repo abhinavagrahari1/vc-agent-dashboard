@@ -1,23 +1,19 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Play, Square, Zap, Phone, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, ArrowDownLeft, ArrowUpRight, Settings, Clipboard, Check as CheckIcon, Pencil
+  Play, Square, Zap, Phone, Users, Activity, Plus, X, Check, AlertCircle, Cpu, Brain, Headphones, Mic, Settings, Pencil
 } from 'lucide-react';
 import {
   ControlBar,
-  GridLayout,
-  ParticipantTile,
   RoomAudioRenderer,
-  useTracks,
   RoomContext,
-  TrackReferenceOrPlaceholder,
 } from '@livekit/components-react';
-import { Room, Track } from 'livekit-client';
 import '@livekit/components-styles';
 import { APPOINTMENT_SCHEDULAR } from '../utils/appointment_schedular';
 import { CUSTOMER_SUPPORT_SPECIALIST } from '../utils/customer_support_specialist';
 import { CARE_COORDINATOR } from '../utils/care_coordinator';
 import { Formik, Form, Field, FieldArray, FormikHelpers, FieldArrayRenderProps } from 'formik';
+import { Room } from 'livekit-client';
 
 // Define types for agent and running agent
 interface AssistantTTS {
@@ -60,6 +56,13 @@ interface Agent {
 interface RunningAgent {
   agent_name: string;
   pid: number;
+}
+
+// Define a type for editAgentInitialValues
+interface EditAgentInitialValues {
+  agentName: string;
+  agentType: string;
+  assistants: Assistant[];
 }
 
 // Place these at the top of the file/component, before useState for assistants
@@ -161,7 +164,7 @@ function AgentLiveKitCall({ agentName, userName, onEnd }: { agentName: string; u
       try {
         await room.connect(serverUrl, token);
       } catch (err) {
-        if (!cancelled) setError('Failed to connect to LiveKit');
+        if (!cancelled) setError(`Failed to connect to LiveKit: ${err}`);
       }
     };
     connect();
@@ -171,11 +174,11 @@ function AgentLiveKitCall({ agentName, userName, onEnd }: { agentName: string; u
     };
   }, [room, token]);
 
-  // End call handler
-  const handleEndCall = () => {
-    room.disconnect();
-    onEnd();
-  };
+  // // End call handler
+  // const handleEndCall = () => {
+  //   room.disconnect();
+  //   onEnd();
+  // };
 
   if (error) {
     return (
@@ -211,24 +214,6 @@ function AgentLiveKitCall({ agentName, userName, onEnd }: { agentName: string; u
   );
 }
 
-function MyVideoConference() {
-  const tracks = useTracks(
-    [
-      { source: Track.Source.Camera, withPlaceholder: true },
-      { source: Track.Source.ScreenShare, withPlaceholder: false },
-    ],
-    { onlySubscribed: false },
-  );
-  return (
-    <GridLayout
-      tracks={tracks}
-      style={{ height: '180px' }}
-    >
-      {((trackRef: TrackReferenceOrPlaceholder) => ParticipantTile({ trackRef })) as any}
-    </GridLayout>
-  );
-}
-
 // ConfigureInboundModal component
 function ConfigureInboundModal({ show, onClose, agentName }: { show: boolean; onClose: () => void; agentName: string }) {
   const [rules, setRules] = useState<{ dispatch_rule_id: string; numbers: string[]; agent_name?: string; sip_trunk_id?: string }[]>([]);
@@ -237,14 +222,13 @@ function ConfigureInboundModal({ show, onClose, agentName }: { show: boolean; on
   const [success, setSuccess] = useState<string | null>(null);
   const [inputId, setInputId] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!show) return;
     setLoading(true);
     setError(null);
     setSuccess(null);
-    fetch('http://127.0.0.1:8000/dispatch_rule_numbers')
+    fetch('http://127.0.00/dispatch_rule_numbers')
       .then(res => res.json())
       .then(data => setRules(data.dispatch_rule_numbers || []))
       .catch(() => setError('Failed to fetch dispatch rules'))
@@ -277,41 +261,9 @@ function ConfigureInboundModal({ show, onClose, agentName }: { show: boolean; on
       setSuccess('Dispatch rule updated successfully!');
       setInputId('');
     } catch (err) {
-      setError('Failed to update dispatch rule');
+      setError(`Failed to update dispatch rule: ${err}`);
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleCopy = (id: string) => {
-    console.log('Copying:', id);
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(id)
-        .then(() => {
-          setCopiedId(id);
-          setTimeout(() => setCopiedId(null), 1200);
-        })
-        .catch(() => {
-          // fallback
-          const tempInput = document.createElement('input');
-          tempInput.value = id;
-          document.body.appendChild(tempInput);
-          tempInput.select();
-          document.execCommand('copy');
-          document.body.removeChild(tempInput);
-          setCopiedId(id);
-          setTimeout(() => setCopiedId(null), 1200);
-        });
-    } else {
-      // fallback
-      const tempInput = document.createElement('input');
-      tempInput.value = id;
-      document.body.appendChild(tempInput);
-      tempInput.select();
-      document.execCommand('copy');
-      document.body.removeChild(tempInput);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 1200);
     }
   };
 
@@ -543,7 +495,7 @@ const Dashboard = () => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: string } | null>(null);
   const [editAgentModalOpen, setEditAgentModalOpen] = useState(false);
-  const [editAgentInitialValues, setEditAgentInitialValues] = useState<any>(null);
+  const [editAgentInitialValues, setEditAgentInitialValues] = useState<EditAgentInitialValues | null>(null);
 
   // Add preset agent templates
   const agentTemplates = [
@@ -685,7 +637,7 @@ const Dashboard = () => {
       });
       setEditAgentModalOpen(true);
     } catch (err) {
-      showNotification('Failed to fetch agent config', 'error');
+      showNotification(`Failed to fetch agent config: ${err}`, 'error');
     }
   };
 
