@@ -3,7 +3,7 @@ import { API_BASE } from '../../lib/api';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const res = await fetch(`${API_BASE}/create-agent`, {
+  const res = await fetch(`${API_BASE}/replace_dispatch_rule`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
