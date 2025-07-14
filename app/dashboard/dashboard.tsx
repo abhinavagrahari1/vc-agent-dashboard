@@ -1329,9 +1329,19 @@ const Dashboard = () => {
               } else {
                 tts = assistant.tts;
               }
+              // Add fallback for deepgram STT
+              let stt = assistant.stt;
+              if (stt.name === 'deepgram') {
+                stt = {
+                  ...stt,
+                  language: stt.language || 'en',
+                  model: stt.model || 'nova-2',
+                };
+              }
               return {
                 ...assistant,
-                tts
+                tts,
+                stt,
               };
             })
           };
@@ -1404,9 +1414,19 @@ const Dashboard = () => {
               } else {
                 tts = assistant.tts;
               }
+              // Add fallback for deepgram STT
+              let stt = assistant.stt;
+              if (stt.name === 'deepgram') {
+                stt = {
+                  ...stt,
+                  language: stt.language || 'en',
+                  model: stt.model || 'nova-2',
+                };
+              }
               return {
                 ...assistant,
-                tts
+                tts,
+                stt,
               };
             })
           };
